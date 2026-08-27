@@ -215,3 +215,105 @@ def test_put_preserves_photo_when_resent(client, payload):
 
     body = client.put(f"{BASE}/{contact_id}", json={**payload, "photo": PHOTO}).json()
     assert body["photo"] == PHOTO
+
+
+# --- addresses (one-to-many) ---------------------------------------------
+
+WORK = {"type": "Work", "street": "1 Market St", "city": "San Francisco", "state": "CA", "country": "USA"}
+HOME = {"type": "Home", "street": "12 Hanover Sq", "city": "London", "country": "UK"}
+
+
+def test_create_contact_with_several_addresses(client, payload):
+    body = client.post(BASE, json={**payload, "addresses": [WORK, HOME]}).json()
+
+    assert [a["type"] for a in body["addresses"]] == ["Work", "Home"]
+    assert body["addresses"][0]["city"] == "San Francisco"
+    # Each address is its own row with its own identity.
+    assert len({a["id"] for a in body["addresses"]}) == 2
+
+
+def test_contact_without_addresses_gets_an_empty_list(client, payload):
+    assert client.post(BASE, json=payload).json()["addresses"] == []
+
+
+def test_two_addresses_may_share_a_type(client, payload):
+    """The relationship is one-to-many, not one-per-type."""
+    body = client.post(BASE, json={**payload, "addresses": [WORK, {**WORK, "street": "2 Market St"}]}).json()
+    assert len(body["addresses"]) == 2
+
+
+def test_address_type_is_restricted(client, payload):
+    response = client.post(BASE, json={**payload, "addresses": [{**WORK, "type": "Vacation"}]})
+    assert response.status_code == 422
+
+
+def test_addresses_survive_a_round_trip(client, payload):
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK, HOME]}).json()["id"]
+    fetched = client.get(f"{BASE}/{contact_id}").json()
+    assert [a["type"] for a in fetched["addresses"]] == ["Work", "Home"]
+
+
+def test_put_replaces_the_address_list(client, payload):
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK, HOME]}).json()["id"]
+
+    body = client.put(f"{BASE}/{contact_id}", json={**payload, "addresses": [HOME]}).json()
+    assert [a["type"] for a in body["addresses"]] == ["Home"]
+
+
+def test_put_without_addresses_clears_them(client, payload):
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK]}).json()["id"]
+    assert client.put(f"{BASE}/{contact_id}", json=payload).json()["addresses"] == []
+
+
+def test_patch_leaves_addresses_alone_when_omitted(client, payload):
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK]}).json()["id"]
+
+    body = client.patch(f"{BASE}/{contact_id}", json={"job_title": "Countess"}).json()
+    assert [a["type"] for a in body["addresses"]] == ["Work"]
+
+
+def test_patch_can_replace_or_empty_the_addresses(client, payload):
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK]}).json()["id"]
+
+    assert client.patch(f"{BASE}/{contact_id}", json={"addresses": [HOME]}).json()["addresses"][0]["type"] == "Home"
+    assert client.patch(f"{BASE}/{contact_id}", json={"addresses": []}).json()["addresses"] == []
+
+
+def test_patch_null_addresses_clears_them(client, payload):
+    """`ContactUpdate` documents an explicit null as clearing a field."""
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK]}).json()["id"]
+    assert client.patch(f"{BASE}/{contact_id}", json={"addresses": None}).json()["addresses"] == []
+
+
+def test_patch_rejects_legacy_scalar_address_fields(client, payload):
+    """The flat columns are gone; sending them must not look like a successful update."""
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    body = client.patch(f"{BASE}/{contact_id}", json={"city": "Nowhere"}).json()
+    assert "city" not in body
+
+
+def test_replacing_addresses_does_not_leave_orphan_rows(client, payload):
+    """delete-orphan must remove the rows a replace dropped, not just unlink them."""
+    from sqlalchemy import func, select
+
+    from app.database import SessionLocal
+    from app.models import Address
+
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK, HOME]}).json()["id"]
+    client.put(f"{BASE}/{contact_id}", json={**payload, "addresses": [HOME]})
+
+    with SessionLocal() as db:
+        assert db.execute(select(func.count()).select_from(Address)).scalar_one() == 1
+
+
+def test_deleting_a_contact_deletes_its_addresses(client, payload):
+    from sqlalchemy import func, select
+
+    from app.database import SessionLocal
+    from app.models import Address
+
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK, HOME]}).json()["id"]
+    assert client.delete(f"{BASE}/{contact_id}").status_code == 204
+
+    with SessionLocal() as db:
+        assert db.execute(select(func.count()).select_from(Address)).scalar_one() == 0
