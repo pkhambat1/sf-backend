@@ -4,6 +4,39 @@ A self-contained Contacts REST API built with **FastAPI** + **SQLAlchemy**, back
 **in-memory SQLite database** by default. No external database, container, or migration
 step is needed — start the process and the API is ready.
 
+## What it serves
+
+A contact carries an optional profile photo and **many addresses**, each tagged
+`Home`, `Work`, or `Other`. Rendered by [sf-frontend](https://github.com/pkhambat1/sf-frontend):
+
+![Contact detail showing a circular profile photo and both a Home and a Work address](docs/screenshots/contact-detail.png)
+
+### The address model
+
+Addresses are a real one-to-many relationship — a separate table with a foreign
+key back to `contacts`, not extra columns and not a JSON blob:
+
+```
+contacts ──1──────*── addresses
+                      id
+                      contact_id  FK → contacts.id  ON DELETE CASCADE
+                      type        Home | Work | Other
+                      street, city, state, postal_code, country
+```
+
+`cascade="all, delete-orphan"` means dropping an address from the list deletes the
+row rather than orphaning it, and deleting a contact takes its addresses with it.
+A contact may have none, one, or several — including two of the same type.
+
+### The photo
+
+Stored inline as a base64 data URL, since the in-memory database has no file
+storage. On the way in the payload is base64-decoded strictly and its leading
+bytes must match the media type the URL declares, because the value is served
+straight back to a browser.
+
+![Contacts list showing one contact with a photo and two falling back to initials](docs/screenshots/contacts-list.png)
+
 ## Quickstart
 
 ```bash
