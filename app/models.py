@@ -31,6 +31,10 @@ class Contact(Base):
 
     notes: Mapped[str | None] = mapped_column(Text)
 
+    # A profile photo stored inline as a base64 data URL (e.g. "data:image/png;base64,...").
+    # The in-memory database has no file storage, so the image travels with the row.
+    photo: Mapped[str | None] = mapped_column(Text)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now(), nullable=False
     )
