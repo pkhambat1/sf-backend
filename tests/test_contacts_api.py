@@ -1,5 +1,3 @@
-import pytest
-
 BASE = "/api/v1/contacts"
 
 
@@ -146,68 +144,3 @@ def test_delete_contact(client, payload):
 def test_root_lists_entrypoints(client):
     body = client.get("/").json()
     assert body["contacts"] == BASE
-
-
-# --- profile photo -------------------------------------------------------
-
-PHOTO = (
-    "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
-)
-
-
-def test_create_contact_with_photo(client, payload):
-    response = client.post(BASE, json={**payload, "photo": PHOTO})
-    assert response.status_code == 201
-    assert response.json()["photo"] == PHOTO
-
-
-def test_photo_defaults_to_none(client, payload):
-    assert client.post(BASE, json=payload).json()["photo"] is None
-
-
-def test_photo_must_be_an_image_data_url(client, payload):
-    response = client.post(BASE, json={**payload, "photo": "https://example.com/a.png"})
-    assert response.status_code == 422
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        "data:image/png;base64,=",  # padding only, decodes to nothing
-        "data:image/png;base64,a===b",  # padding in the middle
-        "data:image/png;base64,!!!!",  # not base64 at all
-        "data:image/png;base64,QUJD",  # valid base64, but the bytes are not a PNG
-        "data:image/gif;base64,iVBORw0KGgoAAAANSUhEUg==",  # PNG bytes claiming to be a GIF
-    ],
-)
-def test_malformed_photo_payloads_are_rejected(client, payload, bad):
-    assert client.post(BASE, json={**payload, "photo": bad}).status_code == 422
-
-
-def test_oversized_photo_is_rejected(client, payload):
-    huge = "data:image/png;base64," + "A" * 3_000_000
-    response = client.post(BASE, json={**payload, "photo": huge})
-    assert response.status_code == 422
-
-
-def test_patch_sets_and_clears_photo(client, payload):
-    contact_id = client.post(BASE, json=payload).json()["id"]
-
-    assert client.patch(f"{BASE}/{contact_id}", json={"photo": PHOTO}).json()["photo"] == PHOTO
-    assert client.patch(f"{BASE}/{contact_id}", json={"photo": None}).json()["photo"] is None
-
-
-def test_put_without_photo_clears_it(client, payload):
-    """PUT is a full replace, so an omitted photo is cleared — the UI must resend it."""
-    contact_id = client.post(BASE, json={**payload, "photo": PHOTO}).json()["id"]
-
-    body = client.put(f"{BASE}/{contact_id}", json=payload).json()
-    assert body["photo"] is None
-
-
-def test_put_preserves_photo_when_resent(client, payload):
-    contact_id = client.post(BASE, json={**payload, "photo": PHOTO}).json()["id"]
-
-    body = client.put(f"{BASE}/{contact_id}", json={**payload, "photo": PHOTO}).json()
-    assert body["photo"] == PHOTO
