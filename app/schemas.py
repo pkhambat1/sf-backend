@@ -229,7 +229,10 @@ class ContactUpdate(BaseModel):
     job_title: str | None = Field(default=None, max_length=200, description="New job title.")
     addresses: list[AddressCreate] | None = Field(
         default=None,
-        description="Replaces the contact's whole address list. Send `[]` to remove them all.",
+        description=(
+            "Replaces the contact's whole address list. Send `[]` or `null` to remove "
+            "them all; omit the key to leave them untouched."
+        ),
     )
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
     photo: str | None = Field(default=None, description="New profile photo as a base64 data URL; null clears it.")

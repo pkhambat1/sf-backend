@@ -279,6 +279,19 @@ def test_patch_can_replace_or_empty_the_addresses(client, payload):
     assert client.patch(f"{BASE}/{contact_id}", json={"addresses": []}).json()["addresses"] == []
 
 
+def test_patch_null_addresses_clears_them(client, payload):
+    """`ContactUpdate` documents an explicit null as clearing a field."""
+    contact_id = client.post(BASE, json={**payload, "addresses": [WORK]}).json()["id"]
+    assert client.patch(f"{BASE}/{contact_id}", json={"addresses": None}).json()["addresses"] == []
+
+
+def test_patch_rejects_legacy_scalar_address_fields(client, payload):
+    """The flat columns are gone; sending them must not look like a successful update."""
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    body = client.patch(f"{BASE}/{contact_id}", json={"city": "Nowhere"}).json()
+    assert "city" not in body
+
+
 def test_replacing_addresses_does_not_leave_orphan_rows(client, payload):
     """delete-orphan must remove the rows a replace dropped, not just unlink them."""
     from sqlalchemy import func, select

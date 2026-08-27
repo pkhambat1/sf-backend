@@ -104,9 +104,10 @@ def update_contact(db: Session, contact: Contact, payload: ContactUpdate) -> Con
             continue
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
 
-    # PATCH only touches addresses when the client actually sent the key.
-    if payload.addresses is not None:
-        _set_addresses(contact, payload.addresses)
+    # PATCH only touches addresses when the client actually sent the key. An
+    # explicit null clears the list, matching how every other field behaves.
+    if "addresses" in payload.model_fields_set:
+        _set_addresses(contact, payload.addresses or [])
 
     db.commit()
     db.refresh(contact)
