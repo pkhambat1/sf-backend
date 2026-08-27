@@ -1,8 +1,8 @@
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Contact
-from app.schemas import ContactCreate, ContactReplace, ContactUpdate
+from app.models import Address, Contact
+from app.schemas import AddressCreate, ContactCreate, ContactReplace, ContactUpdate
 
 SORTABLE_FIELDS = ("id", "first_name", "last_name", "email", "company", "created_at", "updated_at")
 
@@ -59,10 +59,27 @@ def list_contacts(
     return list(items), total
 
 
+def _to_addresses(payloads: list[AddressCreate]) -> list[Address]:
+    return [Address(**item.model_dump()) for item in payloads]
+
+
+def _set_addresses(contact: Contact, payloads: list[AddressCreate]) -> None:
+    """
+    Replace a contact's addresses in place.
+
+    Assigning to the list rather than rebinding lets `delete-orphan` drop the rows
+    that are no longer referenced, so a replace never leaves stale addresses behind.
+    """
+    contact.addresses[:] = _to_addresses(payloads)
+
+
 def create_contact(db: Session, payload: ContactCreate) -> Contact:
     data = payload.model_dump()
     data["email"] = _normalize_email(data["email"])
+    addresses = data.pop("addresses", [])
+
     contact = Contact(**data)
+    contact.addresses = _to_addresses(payload.addresses)
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -71,7 +88,11 @@ def create_contact(db: Session, payload: ContactCreate) -> Contact:
 
 def replace_contact(db: Session, contact: Contact, payload: ContactReplace) -> Contact:
     for field, value in payload.model_dump().items():
+        if field == "addresses":
+            continue  # the ORM objects are set below, not the raw dicts
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
+
+    _set_addresses(contact, payload.addresses)
     db.commit()
     db.refresh(contact)
     return contact
@@ -79,7 +100,14 @@ def replace_contact(db: Session, contact: Contact, payload: ContactReplace) -> C
 
 def update_contact(db: Session, contact: Contact, payload: ContactUpdate) -> Contact:
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "addresses":
+            continue
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
+
+    # PATCH only touches addresses when the client actually sent the key.
+    if payload.addresses is not None:
+        _set_addresses(contact, payload.addresses)
+
     db.commit()
     db.refresh(contact)
     return contact

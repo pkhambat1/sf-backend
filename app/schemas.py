@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
 
+from app.models import AddressType
+
 # A profile photo is accepted as a base64 data URL for a common raster image type.
 # ~2.8 MB of base64 ≈ a 2 MB image once decoded — plenty for an avatar, and a
 # guard against someone pasting a huge payload into the in-memory store.
@@ -57,6 +59,42 @@ def _validate_photo(value: str | None) -> str | None:
     return value
 
 
+class AddressBase(BaseModel):
+    """A postal address belonging to a contact."""
+
+    type: AddressType = Field(
+        default=AddressType.HOME,
+        description="What the address is for: `Home`, `Work`, or `Other`.",
+        examples=["Home"],
+    )
+    street: str | None = Field(
+        default=None,
+        max_length=300,
+        description="Street address, including unit or suite.",
+        examples=["1 Market St, Suite 400"],
+    )
+    city: str | None = Field(default=None, max_length=120, description="City or locality.", examples=["San Francisco"])
+    state: str | None = Field(
+        default=None, max_length=120, description="State, province, or region.", examples=["CA"]
+    )
+    postal_code: str | None = Field(
+        default=None, max_length=20, description="Postal or ZIP code.", examples=["94105"]
+    )
+    country: str | None = Field(default=None, max_length=120, description="Country name.", examples=["USA"])
+
+
+class AddressCreate(AddressBase):
+    """One address in a contact's `addresses` list, as sent to the API."""
+
+
+class AddressRead(AddressBase):
+    """A stored address, as returned inside a contact."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(description="Server-assigned identifier for this address.", examples=[1])
+
+
 class ContactBase(BaseModel):
     """Fields shared by every contact request and response."""
 
@@ -98,26 +136,14 @@ class ContactBase(BaseModel):
         description="Role held at the company.",
         examples=["Mathematician"],
     )
-    address: str | None = Field(
-        default=None,
-        max_length=300,
-        description="Street address, including unit or suite.",
-        examples=["1 Market St, Suite 400"],
+    addresses: list[AddressCreate] = Field(
+        default_factory=list,
+        description=(
+            "Every address for this contact, each tagged `Home`, `Work`, or `Other`. "
+            "A contact may have none, one, or several — including two of the same type."
+        ),
+        examples=[[{"type": "Work", "street": "1 Market St, Suite 400", "city": "San Francisco"}]],
     )
-    city: str | None = Field(default=None, max_length=120, description="City or locality.", examples=["San Francisco"])
-    state: str | None = Field(
-        default=None,
-        max_length=120,
-        description="State, province, or region.",
-        examples=["CA"],
-    )
-    postal_code: str | None = Field(
-        default=None,
-        max_length=20,
-        description="Postal or ZIP code.",
-        examples=["94105"],
-    )
-    country: str | None = Field(default=None, max_length=120, description="Country name.", examples=["USA"])
     notes: str | None = Field(
         default=None,
         description="Free-form notes about the contact. No length limit.",
@@ -145,11 +171,17 @@ _FULL_EXAMPLE = {
     "phone": "+1-415-555-0101",
     "company": "Analytical Engines",
     "job_title": "Mathematician",
-    "address": "1 Market St, Suite 400",
-    "city": "San Francisco",
-    "state": "CA",
-    "postal_code": "94105",
-    "country": "USA",
+    "addresses": [
+        {
+            "type": "Work",
+            "street": "1 Market St, Suite 400",
+            "city": "San Francisco",
+            "state": "CA",
+            "postal_code": "94105",
+            "country": "USA",
+        },
+        {"type": "Home", "city": "London", "country": "UK"},
+    ],
     "notes": "Met at the SF hackathon.",
 }
 _MINIMAL_EXAMPLE = {"first_name": "Grace", "last_name": "Hopper", "email": "grace@example.com"}
@@ -195,11 +227,10 @@ class ContactUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=40, description="New phone number.")
     company: str | None = Field(default=None, max_length=200, description="New company.")
     job_title: str | None = Field(default=None, max_length=200, description="New job title.")
-    address: str | None = Field(default=None, max_length=300, description="New street address.")
-    city: str | None = Field(default=None, max_length=120, description="New city.")
-    state: str | None = Field(default=None, max_length=120, description="New state or region.")
-    postal_code: str | None = Field(default=None, max_length=20, description="New postal code.")
-    country: str | None = Field(default=None, max_length=120, description="New country.")
+    addresses: list[AddressCreate] | None = Field(
+        default=None,
+        description="Replaces the contact's whole address list. Send `[]` to remove them all.",
+    )
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
     photo: str | None = Field(default=None, description="New profile photo as a base64 data URL; null clears it.")
 
@@ -228,6 +259,11 @@ class ContactRead(ContactBase):
     )
 
     id: int = Field(description="Server-assigned identifier.", examples=[1])
+    addresses: list[AddressRead] = Field(
+        default_factory=list,
+        description="Stored addresses for this contact, each with its own id and type.",
+        examples=[[{"id": 1, "type": "Work", "city": "San Francisco"}]],
+    )
     created_at: datetime = Field(
         description="UTC timestamp of when the contact was created.",
         examples=["2026-08-19T16:22:58.189507Z"],
