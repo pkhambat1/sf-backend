@@ -1,3 +1,5 @@
+import base64
+import binascii
 import re
 from datetime import datetime, timezone
 
@@ -6,8 +8,20 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, fie
 # A profile photo is accepted as a base64 data URL for a common raster image type.
 # ~2.8 MB of base64 ≈ a 2 MB image once decoded — plenty for an avatar, and a
 # guard against someone pasting a huge payload into the in-memory store.
-_PHOTO_DATA_URL = re.compile(r"^data:image/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=\s]+$")
+_PHOTO_DATA_URL = re.compile(
+    r"^data:image/(?P<subtype>png|jpeg|jpg|gif|webp);base64,(?P<payload>[A-Za-z0-9+/\s]+={0,2})$"
+)
 MAX_PHOTO_LENGTH = 2_800_000
+
+# The stored value is served straight back to a browser, so the bytes have to be
+# a real image of the type the URL claims — not just base64-shaped text.
+_MAGIC_PREFIXES: dict[str, tuple[bytes, ...]] = {
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "jpg": (b"\xff\xd8\xff",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "webp": (b"RIFF",),
+}
 
 
 def _validate_photo(value: str | None) -> str | None:
@@ -18,8 +32,20 @@ def _validate_photo(value: str | None) -> str | None:
         return None
     if len(value) > MAX_PHOTO_LENGTH:
         raise ValueError("photo is too large; use an image under ~2 MB")
-    if not _PHOTO_DATA_URL.match(value):
+
+    match = _PHOTO_DATA_URL.match(value)
+    if match is None:
         raise ValueError("photo must be a base64 data URL for a PNG, JPEG, GIF, or WebP image")
+
+    try:
+        raw = base64.b64decode(re.sub(r"\s", "", match.group("payload")), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("photo is not valid base64") from exc
+
+    prefixes = _MAGIC_PREFIXES[match.group("subtype")]
+    if not raw.startswith(prefixes):
+        raise ValueError("photo data does not match the image type it declares")
+
     return value
 
 
