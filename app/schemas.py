@@ -20,8 +20,15 @@ _MAGIC_PREFIXES: dict[str, tuple[bytes, ...]] = {
     "jpeg": (b"\xff\xd8\xff",),
     "jpg": (b"\xff\xd8\xff",),
     "gif": (b"GIF87a", b"GIF89a"),
-    "webp": (b"RIFF",),
 }
+
+
+def _is_webp(raw: bytes) -> bool:
+    """
+    WebP is a RIFF container, and `RIFF` alone is also WAV, AVI, and others.
+    The format is only WebP when the `WEBP` FourCC follows the 4-byte size field.
+    """
+    return len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP"
 
 
 def _validate_photo(value: str | None) -> str | None:
@@ -42,8 +49,9 @@ def _validate_photo(value: str | None) -> str | None:
     except (binascii.Error, ValueError) as exc:
         raise ValueError("photo is not valid base64") from exc
 
-    prefixes = _MAGIC_PREFIXES[match.group("subtype")]
-    if not raw.startswith(prefixes):
+    subtype = match.group("subtype")
+    matches = _is_webp(raw) if subtype == "webp" else raw.startswith(_MAGIC_PREFIXES[subtype])
+    if not matches:
         raise ValueError("photo data does not match the image type it declares")
 
     return value

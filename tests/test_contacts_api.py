@@ -179,6 +179,10 @@ def test_photo_must_be_an_image_data_url(client, payload):
         "data:image/png;base64,!!!!",  # not base64 at all
         "data:image/png;base64,QUJD",  # valid base64, but the bytes are not a PNG
         "data:image/gif;base64,iVBORw0KGgoAAAANSUhEUg==",  # PNG bytes claiming to be a GIF
+        # RIFF, but a WAVE container rather than WebP.
+        "data:image/webp;base64,UklGRiQAAABXQVZFZm10IA==",
+        # RIFF header too short to carry a FourCC at all.
+        "data:image/webp;base64,UklGRgA=",
     ],
 )
 def test_malformed_photo_payloads_are_rejected(client, payload, bad):
